@@ -1,0 +1,15 @@
+[submodule "vendor/ladspa"]
+	path = vendor/ladspa
+	url = https://github.com/adsr/ladspa-sdk.git
+[submodule "vendor/dssi"]
+	path = vendor/dssi
+	url = https://github.com/adsr/dssi.git
+[submodule "vendor/soundio"]
+	path = vendor/soundio
+	url = https://github.com/andrewrk/libsoundio.git
+[submodule "vendor/alsa"]
+	path = vendor/alsa
+	url = https://github.com/adsr/alsa-lib.git
+[submodule "vendor/uthash"]
+	path = vendor/uthash
+	url = https://github.com/troydhanson/uthash.git

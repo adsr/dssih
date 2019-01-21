@@ -17,12 +17,12 @@ static void write_callback(struct SoundIoOutStream *outstream, int frame_count_m
     while (frames_left > 0) {
         frame_count = frames_left;
         soundio_outstream_begin_write(outstream, &areas, &frame_count);
-        HASH_ITER(hh, _dssih.plugin_map, plugin, plugin_tmp) {
+        HASH_ITER(hh, _dssih->plugin_map, plugin, plugin_tmp) {
             LL_FOREACH(plugin->inst_list, inst) {
                 inst->dssi_desc->run_synth(inst->handle, (ulong)frame_count, NULL, 0);
             }
         }
-        LL_FOREACH2(_dssih.audio_inst->conn_list, conn, next_reader) {
+        LL_FOREACH2(_dssih->audio_inst->conn_list, conn, next_reader) {
             ch = (conn->reader->port_num == DSSIH_AUDIO_PORT_OUT_L ? 0 : 1);
             for (frame = 0; frame < frame_count; frame++) {
                 *(areas[ch].ptr + areas[ch].step * frame) += conn->data[frame];
@@ -33,15 +33,14 @@ static void write_callback(struct SoundIoOutStream *outstream, int frame_count_m
     }
 }
 
-TKTK
-
 int main(int argc, char **argv) {
-    dssih_plugin_t *plugin;
-    plugin = dssih_plugin_open(argv[1]);
-    dssih_plugin_describe(plugin);
-    dssih_plugin_close(plugin);
+    memset(&_dssih_static, 0, sizeof(dssih_t));
+    _dssih = &_dssih_static;
+    return 0;
+}
 
-TKTK
+/*
+
 
     pthread_t audio_thread;
     pthread_t timer_thread;
@@ -93,4 +92,4 @@ TKTK
     soundio_device_unref(device);
     soundio_destroy(soundio);
     return 0;
-}
+*/

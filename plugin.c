@@ -3,7 +3,7 @@
 static DSSI_Descriptor dssi_desc;
 static LADSPA_Descriptor ladspa_desc;
 static LADSPA_PortDescriptor port_desc[4];
-static char *port_name[4];
+static const char *port_name[4];
 static int inst;
 
 static LADSPA_Handle dssih_audio_instantiate(const LADSPA_Descriptor *desc, ulong sample_rate);
@@ -14,7 +14,7 @@ static void dssih_audio_run_synth(LADSPA_Handle i, ulong c1, snd_seq_event_t *e,
 static void dssih_audio_run(LADSPA_Handle i, ulong c);
 static void dssih_audio_connect_port(LADSPA_Handle i, ulong port, LADSPA_Data *data);
 
-DSSI_Descriptor *dssih_audio_desc_fn(ulong index) {
+const DSSI_Descriptor *dssih_audio_desc_fn(ulong index) {
     if (index != 0) return NULL;
     memset(&dssi_desc, 0, sizeof(DSSI_Descriptor));
     memset(&ladspa_desc, 0, sizeof(LADSPA_Descriptor));
@@ -45,6 +45,8 @@ DSSI_Descriptor *dssih_audio_desc_fn(ulong index) {
 }
 
 static LADSPA_Handle dssih_audio_instantiate(const LADSPA_Descriptor *desc, ulong sample_rate) {
+    (void)desc;
+    (void)sample_rate;
     return (LADSPA_Handle)(&inst);
 }
 

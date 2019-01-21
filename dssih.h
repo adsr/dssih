@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <time.h>
+#include <dlfcn.h>
 
 #include <ladspa.h>
 #include <dssi.h>
@@ -14,7 +15,7 @@
 #define DSSIH_OK  0
 #define DSSIH_ERR 1
 #define DSSIH_RETURN_ERR(fmt, ...) do {                                 \
-    snprintf(dssih->errstr, sizeof(dssih->errstr), (fmt), __VA_ARGS__); \
+    snprintf(_dssih->errstr, sizeof(_dssih->errstr), (fmt), __VA_ARGS__); \
     return DSSIH_ERR;                                                   \
 } while (0)
 
@@ -56,8 +57,9 @@ struct _dssih_plugin_t {
 
 struct _dssih_inst_t {
     dssih_plugin_t *plugin;
-    DSSI_Descriptor *dssi_desc;
+    const DSSI_Descriptor *dssi_desc;
     LADSPA_Handle handle;                   /* LADSPA_Handle == voidptr */
+    ulong port_count;
     dssih_port_t *port_array;
     dssih_conn_t *conn_list;
     dssih_inst_t *next;
@@ -66,7 +68,7 @@ struct _dssih_inst_t {
 struct _dssih_port_t {
     dssih_inst_t *inst;
     ulong port_num;
-    char *port_name;
+    const char *port_name;
     LADSPA_Data data_null;
     LADSPA_PortDescriptor port_desc;        /* LADSPA_PortDescriptor == int LADSPA_PORT_(INPUT|OUTPUT|CONTROL|AUDIO) */
 };
@@ -93,21 +95,21 @@ struct _dssih_timer_t {
     long multiplier;
     dssih_timer_callback_fn *callback;
     void *udata;
-    dssih_timer_t *next_all;
+    dssih_timer_t *next_parent;
     dssih_timer_t *next_child;
 };
 
-int dssih_new(dssih_t **out_dssih);
+int dssih_new(ulong sample_rate, size_t frame_count, dssih_t **out_dssih);
 int dssih_free(dssih_t *dssih);
 
 int dssih_plugin_new(dssih_t *dssih, const char *path, void *module, DSSI_Descriptor_Function desc_fn, dssih_plugin_t **out_plugin);
-int dssih_plugin_new_module(dssih_t *dssih, const char *path, dssih_plugin_t *out_plugin);
+int dssih_plugin_new_module(dssih_t *dssih, const char *path, dssih_plugin_t **out_plugin);
 int dssih_plugin_new_func(dssih_t *dssih, const char *path, DSSI_Descriptor_Function desc_fn, dssih_plugin_t **out_plugin);
 int dssih_plugin_free(dssih_plugin_t *plugin);
 
 int dssih_inst_new_by_num(dssih_plugin_t *plugin, int num, dssih_inst_t **out_inst);
 int dssih_inst_new_by_label(dssih_plugin_t *plugin, const char *label, dssih_inst_t **out_inst);
-int dssih_inst_new(dssih_plugin_t *plugin, DSSI_Descriptor *desc, dssih_inst_t **out_inst);
+int dssih_inst_new(dssih_plugin_t *plugin, const DSSI_Descriptor *desc, dssih_inst_t **out_inst);
 int dssih_inst_free(dssih_inst_t *inst);
 int dssih_inst_connect(dssih_inst_t *writer_inst, ulong writer_port_num, dssih_inst_t *reader_inst, ulong reader_port_num, dssih_conn_t **out_conn);
 int dssih_inst_disconnect(dssih_conn_t *conn);
@@ -124,8 +126,12 @@ int dssih_timer_set_interval(dssih_timer_t *timer, long interval_ms);
 
 int dssih_set_midi_handler(dssih_t *dssih, dssih_midi_handler_callback_fn *callback, void *udata);
 int dssih_run(dssih_t *dssih);
+int dssih_ms_to_timespec(long ms, struct timespec *spec);
 
-DSSI_Descriptor *dssih_audio_desc_fn(ulong index);
+const DSSI_Descriptor *dssih_audio_desc_fn(ulong index);
+
+dssih_t _dssih_static;
+dssih_t *_dssih;
 
 #endif
 

@@ -198,62 +198,99 @@ int dssih_inst_send_midi(dssih_inst_t *inst, int *bytes, int bytes_len) {
     DSSIH_RETURN_ERR("%s", "not implemented");
 }
 
-int dssih_timer_new(dssih_t *dssih, long delay_ms, long interval_ms, long limit, float pct_change, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer) {
+int dssih_timer_new_parent(dssih_t *dssih, long interval_ms, long limit, float change_factor, void *udata, dssih_timer_t **out_timer) {
+    return dssih_timer_new(dssih, NULL, 0, 0, interval_ms, limit, change_factor, udata, out_timer);
+}
+
+int dssih_timer_new_divide(dssih_timer_t *parent, long divisor, long limit, void *udata, dssih_timer_t **out_timer) {
+    return dssih_timer_new(parent->dssih, parent, divisor, 1, 0, limit, 1.f, udata, out_timer);
+}
+
+int dssih_timer_new_multiply(dssih_timer_t *parent, long multiplier, long limit, void *udata, dssih_timer_t **out_timer) {
+    return dssih_timer_new(parent->dssih, parent, multiplier, 0, 0, limit, 1.f, udata, out_timer);
+}
+
+int dssih_timer_new(dssih_t *dssih, dssih_timer_t *parent, long factor, int is_divisor, long interval_ms, long limit, float change_factor, void *udata, dssih_timer_t **out_timer) {
+    int fd;
     dssih_timer_t *timer;
-    timer = calloc(1, sizeof(dssih_timer_t));
-    dssih_ms_to_timespec(delay_ms, &timer->spec.it_value);
-    dssih_ms_to_timespec(interval_ms, &timer->spec.it_interval);
-    timer->delay_ms = delay_ms;
-    timer->interval_ms = interval_ms;
-    timer->pct_change = pct_change;
-    timer->limit = limit;
-    timer->callback = callback;
-    timer->udata = udata;
-    *out_timer = timer;
-    LL_APPEND2(dssih->timer_list, timer, next_parent);
-    return 0;
-}
-
-int dssih_ms_to_timespec(long ms, struct timespec *spec) {
-    long s, ns;
-    s = ms / 1000;
-    ms -= (s * 1000);
-    ns = ms * 1000;
-    spec->tv_sec = s;
-    spec->tv_nsec = ns;
-    return 0;
-}
-
-int dssih_timer_new_divide(dssih_timer_t *parent, long divisor, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer) {
-    return dssih_timer_new_factor(parent, divisor, 1, delay_ms, limit, callback, udata, out_timer);
-}
-
-int dssih_timer_new_multiply(dssih_timer_t *parent, long multiplier, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer) {
-    return dssih_timer_new_factor(parent, multiplier, 0, delay_ms, limit, callback, udata, out_timer);
-}
-
-int dssih_timer_new_factor(dssih_timer_t *parent, long factor, int is_divisor, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer) {
-    dssih_timer_t *timer;
-    timer = calloc(1, sizeof(dssih_timer_t));
-    dssih_ms_to_timespec(delay_ms, &timer->spec.it_value);
-    timer->parent = parent;
-    timer->delay_ms = delay_ms;
-    timer->limit = limit;
-    if (is_divisor) {
-        timer->divisor = factor;
-    } else {
-        timer->multiplier = factor;
+    if ((fd = timerfd_create(CLOCK_MONOTONIC, 0)) == -1) {
+        DSSIH_RETURN_ERR("dssih_timer_new: timerfd_create failed: %s", strerror(errno));
     }
-    timer->callback = callback;
+    timer = calloc(1, sizeof(dssih_timer_t));
+    timer->fd = fd;
+    timer->dssih = dssih;
+    timer->change_factor = change_factor;
+    timer->limit = limit;
     timer->udata = udata;
+    if (parent) {
+        timer->parent = parent;
+        if (is_divisor) {
+            timer->interval_ms = parent->interval_ms / factor;
+            timer->divisor = factor;
+        } else {
+            timer->interval_ms = parent->interval_ms * factor;
+            timer->multiplier = factor;
+        }
+        LL_APPEND2(parent->child_list, timer, next_child);
+    } else {
+        timer->interval_ms = interval_ms;
+        LL_APPEND2(dssih->timer_list, timer, next_parent);
+    }
+    HASH_ADD_INT(dssih->timer_map, fd, timer);
     *out_timer = timer;
-    LL_APPEND2(parent->child_list, timer, next_child);
+    return 0;
+}
+
+int dssih_timer_rearm_child(dssih_timer_t *timer) {
+    if (timer->divisor <= 0) {
+        DSSIH_RETURN_ERR("%s", "dssih_timer_rearm_divided: Expected timer->divisor >= 1");
+    }
+    dssih_ms_to_timespec(timer->interval_ms, &timer->spec.it_value);
+    dssih_ms_to_timespec(timer->interval_ms, &timer->spec.it_interval);
+    return dssih_timer_arm_ex(timer);
+}
+
+int dssih_timer_arm(dssih_timer_t *timer) {
+    timer->spec.it_value.tv_sec = 0;
+    timer->spec.it_value.tv_nsec = 1;
+    dssih_ms_to_timespec(timer->interval_ms, &timer->spec.it_interval);
+    return dssih_timer_arm_ex(timer);
+}
+
+int dssih_timer_arm_ex(dssih_timer_t *timer) {
+    if (timer->multiplier >= 1) {
+        // Multiplied timers are not armed
+        // They are instead triggered by the parent
+        return 0;
+    }
+    if (timer->spec.it_value.tv_sec == 0 && timer->spec.it_value.tv_nsec == 0) {
+        // Ensure it_value is non-zero to avoid disarming the timer
+        timer->spec.it_value.tv_nsec = 1;
+    }
+    if (timerfd_settime(timer->fd, 0, &timer->spec, NULL) == -1) {
+        DSSIH_RETURN_ERR("dssih_timer_arm_ex: timerfd_settime failed: %s", strerror(errno));
+    }
+    return 0;
+}
+
+int dssih_timer_disarm(dssih_timer_t *timer) {
+    memset(&timer->spec, 0, sizeof(struct itimerspec));
+    if (timerfd_settime(timer->fd, 0, &timer->spec, NULL) == -1) {
+        DSSIH_RETURN_ERR("dssih_timer_disarm: timerfd_settime failed: %s", strerror(errno));
+    }
     return 0;
 }
 
 int dssih_timer_free(dssih_timer_t *timer) {
-    (void)timer;
-    DSSIH_RETURN_ERR("%s", "not implemented");
+    HASH_DEL(timer->dssih->timer_map, timer);
+    if (timer->parent) {
+        LL_DELETE2(timer->parent->child_list, timer, next_child);
+    } else {
+        LL_DELETE2(timer->dssih->timer_list, timer, next_parent);
+    }
+    close(timer->fd);
+    free(timer);
+    return 0;
 }
 
 int dssih_timer_set_interval(dssih_timer_t *timer, long interval_ms) {
@@ -273,6 +310,16 @@ int dssih_set_midi_handler(dssih_t *dssih, dssih_midi_handler_callback_fn *callb
     (void)callback;
     (void)udata;
     DSSIH_RETURN_ERR("%s", "not implemented");
+}
+
+int dssih_ms_to_timespec(long ms, struct timespec *spec) {
+    long s, ns;
+    s = ms / 1000;
+    ms -= (s * 1000);
+    ns = ms * 1000000;
+    spec->tv_sec = s;
+    spec->tv_nsec = ns;
+    return 0;
 }
 
 int dssih_run(dssih_t *dssih) {

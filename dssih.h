@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <time.h>
 #include <dlfcn.h>
+#include <sys/timerfd.h>
+#include <sys/epoll.h>
+#include <errno.h>
+#include <unistd.h>
 
 #include <ladspa.h>
 #include <dssi.h>
@@ -39,6 +43,7 @@ typedef int (*dssih_timer_callback_fn)(dssih_timer_t *timer, void *udata, long c
 struct _dssih_t {
     dssih_plugin_t *plugin_map;
     dssih_timer_t *timer_list;
+    dssih_timer_t *timer_map;
     dssih_plugin_t *audio_plugin;
     dssih_inst_t *audio_inst;
     ulong sample_rate;
@@ -83,28 +88,31 @@ struct _dssih_conn_t {
 };
 
 struct _dssih_timer_t {
+    dssih_t *dssih;
     struct _dssih_timer_t *parent;
     struct _dssih_timer_t *child_list;
+    int fd;
     struct itimerspec spec;
-    long delay_ms;
     long interval_ms;
-    float pct_change;
+    float change_factor;
     long limit;
     long count;
     long divisor;
     long multiplier;
-    dssih_timer_callback_fn *callback;
     void *udata;
+    int is_dead;
     dssih_timer_t *next_parent;
     dssih_timer_t *next_child;
+    UT_hash_handle hh;
 };
+
 
 int dssih_new(ulong sample_rate, size_t frame_count, dssih_t **out_dssih);
 int dssih_free(dssih_t *dssih);
 
-int dssih_plugin_new(dssih_t *dssih, const char *path, void *module, DSSI_Descriptor_Function desc_fn, dssih_plugin_t **out_plugin);
 int dssih_plugin_new_module(dssih_t *dssih, const char *path, dssih_plugin_t **out_plugin);
 int dssih_plugin_new_func(dssih_t *dssih, const char *path, DSSI_Descriptor_Function desc_fn, dssih_plugin_t **out_plugin);
+int dssih_plugin_new(dssih_t *dssih, const char *path, void *module, DSSI_Descriptor_Function desc_fn, dssih_plugin_t **out_plugin);
 int dssih_plugin_free(dssih_plugin_t *plugin);
 
 int dssih_inst_new_by_num(dssih_plugin_t *plugin, int num, dssih_inst_t **out_inst);
@@ -116,13 +124,18 @@ int dssih_inst_disconnect(dssih_conn_t *conn);
 int dssih_inst_play(dssih_inst_t *inst, int *notes, int notes_len, int vel, long len_ms);
 int dssih_inst_send_midi(dssih_inst_t *inst, int *bytes, int bytes_len);
 
-int dssih_timer_new(dssih_t *dssih, long delay_ms, long interval_ms, long limit, float pct_change, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer);
-int dssih_timer_new_divide(dssih_timer_t *parent, long divisor, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer);
-int dssih_timer_new_multiply(dssih_timer_t *parent, long multiplier, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer);
-int dssih_timer_new_factor(dssih_timer_t *parent, long factor, int is_divisor, long delay_ms, long limit, dssih_timer_callback_fn *callback, void *udata, dssih_timer_t **out_timer);
+int dssih_timer_new_parent(dssih_t *dssih, long interval_ms, long limit, float change_factor, void *udata, dssih_timer_t **out_timer);
+int dssih_timer_new_divide(dssih_timer_t *parent, long divisor, long limit, void *udata, dssih_timer_t **out_timer);
+int dssih_timer_new_multiply(dssih_timer_t *parent, long multiplier, long limit, void *udata, dssih_timer_t **out_timer);
+int dssih_timer_new(dssih_t *dssih, dssih_timer_t *parent, long factor, int is_divisor, long interval_ms, long limit, float change_factor, void *udata, dssih_timer_t **out_timer);
 int dssih_timer_free(dssih_timer_t *timer);
-int dssih_timer_set_count(dssih_timer_t *timer, int count);
 int dssih_timer_set_interval(dssih_timer_t *timer, long interval_ms);
+int dssih_timer_set_count(dssih_timer_t *timer, int count);
+int dssih_timer_arm(dssih_timer_t *timer);
+int dssih_timer_arm_ex(dssih_timer_t *timer);
+int dssih_timer_rearm_child(dssih_timer_t *timer);
+int dssih_timer_disarm(dssih_timer_t *timer);
+
 
 int dssih_set_midi_handler(dssih_t *dssih, dssih_midi_handler_callback_fn *callback, void *udata);
 int dssih_run(dssih_t *dssih);

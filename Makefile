@@ -1,6 +1,6 @@
 prefix?=/usr/local
 
-dssih_cflags:=-std=c99 -Wall -Wextra -pedantic -g -O3 -D_GNU_SOURCE -I. $(CFLAGS)
+dssih_cflags:=-std=c99 -Wall -Wextra -pedantic -g -O0 -D_GNU_SOURCE -I. $(CFLAGS)
 dssih_ldflags:=$(LDFLAGS)
 dssih_dynamic_libs:=-lsoundio
 dssih_include_dirs:=-Ivendor/soundio -Ivendor/dssi/dssi -Ivendor/ladspa/src -Ivendor/uthash/src
